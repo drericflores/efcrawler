@@ -13,6 +13,7 @@
 #include <QFrame>
 #include <QHeaderView>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
@@ -477,6 +478,11 @@ void applyTheme(
 int main(int argc, char* argv[])
 {
     QApplication app(argc, argv);
+
+    const QIcon applicationIcon(
+        QStringLiteral(":/efcrawler/efcrawler.png"));
+
+    QApplication::setWindowIcon(applicationIcon);
 
     QApplication::setApplicationName(
         QStringLiteral("eFCrawler"));

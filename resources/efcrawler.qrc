@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/efcrawler">
+        <file>efcrawler.png</file>
+    </qresource>
+</RCC>

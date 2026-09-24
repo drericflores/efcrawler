@@ -5,3 +5,7 @@ cmake-build-*/
 
 # Local development freezes
 freezes/
+
+# Never commit SSH keys
+*githubkey
+*githubkey.pub

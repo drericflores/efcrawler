@@ -23,6 +23,8 @@ qt_standard_project_setup()
 qt_add_executable(efcrawler
     src/main.cpp
 
+    resources/efcrawler.qrc
+
     src/core/ResearchEngine.cpp
     src/core/ResearchEngine.hpp
 
