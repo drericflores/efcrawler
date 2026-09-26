@@ -1,0 +1,107 @@
+#include "LicenseGate.hpp"
+
+#include <QStringList>
+
+#include <algorithm>
+
+namespace efcrawler {
+namespace {
+
+// Strong signals: these genuinely imply free / open / public-domain access.
+const QStringList kStrongFree = {
+    QStringLiteral("gutenberg"),          QStringLiteral("archive.org/details"),
+    QStringLiteral("openaccess"),         QStringLiteral("open-access"),
+    QStringLiteral("publicdomain"),       QStringLiteral("public-domain"),
+    QStringLiteral("creativecommons"),    QStringLiteral("commons.wikimedia.org"),
+    QStringLiteral("openverse"),          QStringLiteral("doaj.org"),
+    QStringLiteral("core.ac.uk"),         QStringLiteral("arxiv.org"),
+    QStringLiteral("zenodo.org"),         QStringLiteral("hal.science"),
+};
+
+// Matched against the *hostname*, so "storage" no longer matches "store".
+const QStringList kCommercialHosts = {
+    QStringLiteral("amazon."),       QStringLiteral("ebay."),
+    QStringLiteral("walmart."),      QStringLiteral("barnesandnoble."),
+    QStringLiteral("abebooks."),     QStringLiteral("audible."),
+    QStringLiteral("udemy."),        QStringLiteral("coursera."),
+    QStringLiteral("shutterstock."), QStringLiteral("envato."),
+    QStringLiteral("istockphoto."),  QStringLiteral("gettyimages."),
+};
+
+// Matched against whole path segments, so "buyer" no longer matches "buy".
+const QStringList kCommercialTokens = {
+    QStringLiteral("checkout"),     QStringLiteral("cart"),
+    QStringLiteral("pricing"),      QStringLiteral("subscribe"),
+    QStringLiteral("subscription"), QStringLiteral("purchase"),
+};
+
+// Recognised open licences, for provider-supplied metadata.
+const QStringList kFreeLicenceNames = {
+    QStringLiteral("cc0"),          QStringLiteral("public domain"),
+    QStringLiteral("cc by"),        QStringLiteral("cc-by"),
+    QStringLiteral("creative commons"),
+    QStringLiteral("gfdl"),         QStringLiteral("fdl"),
+};
+
+} // namespace
+
+bool LicenseGate::isFreeLicense(const QString& license)
+{
+    const QString lower = license.toLower();
+
+    return std::any_of(kFreeLicenceNames.cbegin(), kFreeLicenceNames.cend(),
+                       [&lower](const QString& needle) {
+                           return lower.contains(needle);
+                       });
+}
+
+Access LicenseGate::judge(const SearchResult& result)
+{
+    // 1. Authoritative: the provider told us the licence.
+    if (!result.license.isEmpty()) {
+        return isFreeLicense(result.license) ? Access::Free : Access::Commercial;
+    }
+
+    const QString host = result.url.host().toLower();
+    const QString path = result.url.path().toLower();
+
+    const bool commercialHost =
+        std::any_of(kCommercialHosts.cbegin(), kCommercialHosts.cend(),
+                    [&host](const QString& needle) {
+                        return host.contains(needle);
+                    });
+
+    const bool commercialPath =
+        std::any_of(kCommercialTokens.cbegin(), kCommercialTokens.cend(),
+                    [&path](const QString& token) {
+                        return path.split(QLatin1Char('/')).contains(token);
+                    });
+
+    // No ".pdf" escape hatch: an extension is not a licence, so a paywalled
+    // PDF on a commercial host is now correctly classified Commercial.
+    if (commercialHost || commercialPath) {
+        return Access::Commercial;
+    }
+
+    const QString haystack = host + QLatin1Char(' ') + path;
+
+    const bool strongFree =
+        std::any_of(kStrongFree.cbegin(), kStrongFree.cend(),
+                    [&haystack](const QString& needle) {
+                        return haystack.contains(needle);
+                    });
+
+    return strongFree ? Access::Free : Access::Unknown;
+}
+
+bool LicenseGate::shouldKeep(const SearchResult& result, bool freeOnly)
+{
+    if (!freeOnly) {
+        return true;
+    }
+    // Unknown is kept: "we could not tell" is not the same as "paywalled",
+    // and the UI labels the three states distinctly.
+    return result.access != Access::Commercial;
+}
+
+} // namespace efcrawler
