@@ -182,6 +182,7 @@ void ResearchEngine::startResearch(const QString& topic)
         stopResearch();
     }
 
+    ++runGeneration_;
     topic_ = normalized;
 
     pendingQueries_.clear();
@@ -259,9 +260,11 @@ void ResearchEngine::stopResearch()
     }
 
     stopRequested_ = true;
+    ++runGeneration_;
     state_ = State::Idle;
 
     pendingQueries_.clear();
+    pendingDispatch_ = false;
 
     general_->cancel();
     media_->cancel();
@@ -406,8 +409,13 @@ void ResearchEngine::dispatchNextQuery()
     }
 
     pendingDispatch_ = true;
+    const quint64 runGeneration = runGeneration_;
 
-    QTimer::singleShot(delayMs, this, [this, provider, query]() {
+    QTimer::singleShot(delayMs, this, [this, provider, query, runGeneration]() {
+        if (runGeneration != runGeneration_) {
+            return;
+        }
+
         pendingDispatch_ = false;
 
         if (state_ != State::Searching || stopRequested_) {

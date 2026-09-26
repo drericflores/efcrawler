@@ -160,6 +160,14 @@ void MediaProbe::onFinished(QNetworkReply* reply, const QSharedPointer<State>& s
         return;
     }
 
+    if (status >= 400) {
+        state->info.probed = true;
+        state->info.ok = false;
+        state->info.error = QStringLiteral("HTTP %1").arg(status);
+        finish(state);
+        return;
+    }
+
     state->info.probed = true;
     state->info.ok = true;
     state->info.mime = reply->header(QNetworkRequest::ContentTypeHeader).toString();
@@ -232,7 +240,7 @@ QString MediaProbe::fileNameFromDisposition(const QByteArray& header)
 
     // Plain form: filename="My Song.mp3"
     static const QRegularExpression plain(
-        QStringLiteral(R"(filename\s*=\s*"?([^";]+)"?)"),
+        QStringLiteral(R"re(filename\s*=\s*"?([^";]+)"?)re"),
         QRegularExpression::CaseInsensitiveOption);
 
     if (const auto match = plain.match(value); match.hasMatch()) {

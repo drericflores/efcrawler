@@ -15,20 +15,6 @@ constexpr auto kUserAgent =
     "eFCrawler/" EFCRAWLER_VERSION
     " (https://github.com/drericflores/efcrawler)";
 
-ResourceType typeForMediatype(const QString& mediatype)
-{
-    const QString m = mediatype.toLower();
-
-    if (m == QLatin1String("audio"))    { return ResourceType::Audio; }
-    if (m == QLatin1String("movies"))   { return ResourceType::Movie; }
-    if (m == QLatin1String("image"))    { return ResourceType::Image; }
-    if (m == QLatin1String("texts"))    { return ResourceType::Pdf; }
-    if (m == QLatin1String("data"))     { return ResourceType::Data; }
-    if (m == QLatin1String("software")) { return ResourceType::Archive; }
-
-    return ResourceType::Media;
-}
-
 } // namespace
 
 InternetArchiveProvider::InternetArchiveProvider(QObject* parent)
@@ -162,9 +148,8 @@ void InternetArchiveProvider::processReply(QNetworkReply* reply)
             continue;
         }
 
-        // /details/<id> is the item page -- the Media bucket, not a file.
-        // Individual files live under /download/<id>/<file> and arrive with an
-        // extension, so ResourceClassifier pins those down precisely.
+        // This is an item page, not a direct media file. Do not present the
+        // page itself as an audio/video/PDF download.
         const QUrl url(QStringLiteral("https://archive.org/details/") + identifier);
         const QString canonical = url.toString(QUrl::FullyEncoded);
 
@@ -173,21 +158,20 @@ void InternetArchiveProvider::processReply(QNetworkReply* reply)
         }
         seenUrls_.insert(canonical);
 
-        const QString mediatype = doc.value(QStringLiteral("mediatype")).toString();
-
         SearchResult result;
         result.title = doc.value(QStringLiteral("title")).toString().trimmed();
         if (result.title.isEmpty()) {
             result.title = identifier;
         }
 
-        result.type = typeForMediatype(mediatype);
+        result.type = ResourceType::Media;
         result.provider = name();
         result.source = QStringLiteral("archive.org");
         result.size = ResourceClassifier::formatSize(-1);
         result.url = url;
+        result.downloadable = false;
 
-        // The whole collection is free to access; licenseurl refines how free.
+        // A reachable item page does not by itself grant reuse rights.
         result.licenseUrl = doc.value(QStringLiteral("licenseurl")).toString();
         if (!result.licenseUrl.isEmpty()) {
             result.license = result.licenseUrl;

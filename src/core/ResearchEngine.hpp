@@ -94,6 +94,7 @@ private:
     int queriesCompleted_{0};
     int totalQueries_{0};
     int resultCount_{0};
+    quint64 runGeneration_{0};
 
     bool generalAvailable_{true};
     bool mediaAvailable_{true};

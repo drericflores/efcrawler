@@ -8,12 +8,9 @@ namespace efcrawler {
 namespace {
 
 // Strong signals: these genuinely imply free / open / public-domain access.
-const QStringList kStrongFree = {
-    QStringLiteral("gutenberg"),          QStringLiteral("archive.org/details"),
-    QStringLiteral("openaccess"),         QStringLiteral("open-access"),
-    QStringLiteral("publicdomain"),       QStringLiteral("public-domain"),
-    QStringLiteral("creativecommons"),    QStringLiteral("commons.wikimedia.org"),
-    QStringLiteral("openverse"),          QStringLiteral("doaj.org"),
+const QStringList kStrongFreeHosts = {
+    QStringLiteral("gutenberg.org"),      QStringLiteral("commons.wikimedia.org"),
+    QStringLiteral("openverse.org"),      QStringLiteral("doaj.org"),
     QStringLiteral("core.ac.uk"),         QStringLiteral("arxiv.org"),
     QStringLiteral("zenodo.org"),         QStringLiteral("hal.science"),
 };
@@ -39,6 +36,9 @@ const QStringList kCommercialTokens = {
 const QStringList kFreeLicenceNames = {
     QStringLiteral("cc0"),          QStringLiteral("public domain"),
     QStringLiteral("cc by"),        QStringLiteral("cc-by"),
+    QStringLiteral("creativecommons.org/licenses/"),
+    QStringLiteral("creativecommons.org/publicdomain/zero/"),
+    QStringLiteral("creativecommons.org/publicdomain/mark/"),
     QStringLiteral("creative commons"),
     QStringLiteral("gfdl"),         QStringLiteral("fdl"),
 };
@@ -82,12 +82,11 @@ Access LicenseGate::judge(const SearchResult& result)
         return Access::Commercial;
     }
 
-    const QString haystack = host + QLatin1Char(' ') + path;
-
     const bool strongFree =
-        std::any_of(kStrongFree.cbegin(), kStrongFree.cend(),
-                    [&haystack](const QString& needle) {
-                        return haystack.contains(needle);
+        std::any_of(kStrongFreeHosts.cbegin(), kStrongFreeHosts.cend(),
+                    [&host](const QString& domain) {
+                        return host == domain ||
+                               host.endsWith(QLatin1Char('.') + domain);
                     });
 
     return strongFree ? Access::Free : Access::Unknown;

@@ -1,4 +1,6 @@
 #include "core/ResearchEngine.hpp"
+#include "model/MediaProbe.hpp"
+#include "model/ResourceClassifier.hpp"
 #include "model/ResourceType.hpp"
 
 #include <QAbstractItemView>
@@ -15,6 +17,7 @@
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QItemSelectionModel>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
@@ -27,6 +30,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QSettings>
 #include <QStandardItemModel>
 #include <QStandardPaths>
@@ -701,6 +705,14 @@ int main(int argc, char* argv[])
 
     freeOnly->setChecked(savedFreeOnly);
 
+    auto* audio = new QCheckBox(QStringLiteral("Audio"), researchCard);
+    auto* movies = new QCheckBox(QStringLiteral("Movies"), researchCard);
+    auto* media = new QCheckBox(QStringLiteral("Media"), researchCard);
+
+    audio->setChecked(settings.value(QStringLiteral("research/media/audio"), false).toBool());
+    movies->setChecked(settings.value(QStringLiteral("research/media/movies"), false).toBool());
+    media->setChecked(settings.value(QStringLiteral("research/media/media"), false).toBool());
+
     auto* freeExplanation =
         new QLabel(
             QStringLiteral(
@@ -714,6 +726,13 @@ int main(int argc, char* argv[])
     optionsRow->addWidget(freeOnly);
     optionsRow->addWidget(freeExplanation);
     optionsRow->addStretch();
+
+    auto* mediaOptionsRow = new QHBoxLayout();
+    mediaOptionsRow->addWidget(new QLabel(QStringLiteral("Include:"), researchCard));
+    mediaOptionsRow->addWidget(audio);
+    mediaOptionsRow->addWidget(movies);
+    mediaOptionsRow->addWidget(media);
+    mediaOptionsRow->addStretch();
 
     auto* buttonRow = new QHBoxLayout();
 
@@ -771,6 +790,7 @@ int main(int argc, char* argv[])
     researchLayout->addWidget(researchTitle);
     researchLayout->addWidget(topic);
     researchLayout->addLayout(optionsRow);
+    researchLayout->addLayout(mediaOptionsRow);
     researchLayout->addLayout(buttonRow);
 
     // --------------------------------------------------------
@@ -939,9 +959,18 @@ int main(int argc, char* argv[])
     // --------------------------------------------------------
 
     efcrawler::ResearchEngine engine(&window);
+    efcrawler::MediaProbe mediaProbe(&window);
 
-    engine.setFreeOnly(
-        freeOnly->isChecked());
+    auto applyResearchOptions = [&]() {
+        efcrawler::ResearchPlanOptions options = engine.options();
+        options.freeOnly = freeOnly->isChecked();
+        options.wantAudio = audio->isChecked();
+        options.wantMovies = movies->isChecked();
+        options.wantMedia = media->isChecked();
+        engine.setOptions(options);
+    };
+
+    applyResearchOptions();
 
     QObject::connect(
         freeOnly,
@@ -953,7 +982,7 @@ int main(int argc, char* argv[])
                     "research/freeOnly"),
                 enabled);
 
-            engine.setFreeOnly(enabled);
+            applyResearchOptions();
 
             window.statusBar()->showMessage(
                 enabled
@@ -963,6 +992,18 @@ int main(int argc, char* argv[])
                           "General research enabled."),
                 3000);
         });
+
+    const auto persistMediaOption = [&](QCheckBox* option, const QString& key) {
+        QObject::connect(option, &QCheckBox::toggled, &window,
+                         [&, key](bool checked) {
+                             settings.setValue(key, checked);
+                             applyResearchOptions();
+                         });
+    };
+
+    persistMediaOption(audio, QStringLiteral("research/media/audio"));
+    persistMediaOption(movies, QStringLiteral("research/media/movies"));
+    persistMediaOption(media, QStringLiteral("research/media/media"));
 
     // --------------------------------------------------------
     // Theme selection
@@ -1078,9 +1119,8 @@ int main(int argc, char* argv[])
         new QNetworkAccessManager(&window);
 
     QNetworkReply* downloadReply = nullptr;
-    QFile* downloadFile = nullptr;
+    QSaveFile* downloadFile = nullptr;
     QString downloadFinalPath;
-    QString downloadPartPath;
 
     auto downloadSelected =
         [&]() {
@@ -1107,6 +1147,20 @@ int main(int argc, char* argv[])
                 return;
             }
 
+            const QModelIndex selected = results->currentIndex();
+            const bool downloadable = selected.isValid() &&
+                model->data(
+                    model->index(selected.row(), 0),
+                    Qt::UserRole).toBool();
+            if (!downloadable) {
+                QMessageBox::information(
+                    &window,
+                    QStringLiteral("eFCrawler"),
+                    QStringLiteral(
+                        "This result is not a direct downloadable file."));
+                return;
+            }
+
             QDir().mkpath(
                 downloadDirectory());
 
@@ -1126,15 +1180,9 @@ int main(int argc, char* argv[])
                 return;
             }
 
-            downloadPartPath =
-                downloadFinalPath +
-                QStringLiteral(".part");
-
-            QFile::remove(downloadPartPath);
-
             downloadFile =
-                new QFile(
-                    downloadPartPath,
+                new QSaveFile(
+                    downloadFinalPath,
                     &window);
 
             if (!downloadFile->open(
@@ -1145,7 +1193,7 @@ int main(int argc, char* argv[])
                         "Download Failed"),
                     QStringLiteral(
                         "Unable to create:\n%1")
-                        .arg(downloadPartPath));
+                        .arg(downloadFinalPath));
 
                 downloadFile->deleteLater();
                 downloadFile = nullptr;
@@ -1179,8 +1227,11 @@ int main(int argc, char* argv[])
                 [&]() {
                     if (downloadReply &&
                         downloadFile) {
-                        downloadFile->write(
-                            downloadReply->readAll());
+                        const QByteArray chunk = downloadReply->readAll();
+                        if (!chunk.isEmpty() &&
+                            downloadFile->write(chunk) != chunk.size()) {
+                            downloadReply->abort();
+                        }
                     }
                 });
 
@@ -1210,56 +1261,51 @@ int main(int argc, char* argv[])
 
                     downloadReply = nullptr;
 
-                    if (downloadFile) {
-                        if (finished) {
-                            downloadFile->write(
-                                finished->readAll());
-                        }
-
-                        downloadFile->close();
-                    }
-
                     if (!finished) {
                         return;
                     }
 
-                    if (finished->error() !=
-                        QNetworkReply::NoError) {
-                        QFile::remove(
-                            downloadPartPath);
+                    bool writeSucceeded = downloadFile != nullptr;
+                    if (downloadFile) {
+                        const QByteArray remaining = finished->readAll();
+                        if (!remaining.isEmpty() &&
+                            downloadFile->write(remaining) != remaining.size()) {
+                            writeSucceeded = false;
+                        }
+                    }
+
+                    if (finished->error() != QNetworkReply::NoError ||
+                        !writeSucceeded) {
+                        const QString error = downloadFile && !writeSucceeded
+                            ? downloadFile->errorString()
+                            : finished->errorString();
+                        if (downloadFile) {
+                            downloadFile->cancelWriting();
+                        }
 
                         QMessageBox::warning(
                             &window,
                             QStringLiteral(
                                 "Download Failed"),
-                            finished->errorString());
+                            error);
+                    } else if (!downloadFile->commit()) {
+                        const QString error = downloadFile->errorString();
+                        downloadFile->cancelWriting();
+                        QMessageBox::warning(
+                            &window,
+                            QStringLiteral("Download Failed"),
+                            error);
                     } else {
-                        QFile::remove(
-                            downloadFinalPath);
+                        activity->setText(
+                            QStringLiteral(
+                                "Download complete: %1")
+                                .arg(downloadFinalPath));
 
-                        if (!QFile::rename(
-                                downloadPartPath,
-                                downloadFinalPath)) {
-                            QMessageBox::warning(
-                                &window,
+                        window.statusBar()
+                            ->showMessage(
                                 QStringLiteral(
-                                    "Download Failed"),
-                                QStringLiteral(
-                                    "The temporary download "
-                                    "could not be renamed."));
-                        } else {
-                            activity->setText(
-                                QStringLiteral(
-                                    "Download complete: %1")
-                                    .arg(
-                                        downloadFinalPath));
-
-                            window.statusBar()
-                                ->showMessage(
-                                    QStringLiteral(
-                                        "Download complete."),
-                                    5000);
-                        }
+                                    "Download complete."),
+                                5000);
                     }
 
                     if (downloadFile) {
@@ -1305,12 +1351,14 @@ int main(int argc, char* argv[])
             stopAction->setEnabled(!idle);
 
             freeOnly->setEnabled(idle);
+            audio->setEnabled(idle);
+            movies->setEnabled(idle);
+            media->setEnabled(idle);
         };
 
     auto startResearch =
         [&]() {
-            engine.setFreeOnly(
-                freeOnly->isChecked());
+            applyResearchOptions();
 
             engine.startResearch(
                 topic->text());
@@ -1391,6 +1439,7 @@ int main(int argc, char* argv[])
             auto* titleItem =
                 new QStandardItem(
                     result.title);
+            titleItem->setData(result.downloadable, Qt::UserRole);
 
             auto* typeItem =
                 new QStandardItem(
@@ -1447,6 +1496,62 @@ int main(int argc, char* argv[])
                             ? QString()
                             : QStringLiteral("s")));
         });
+
+            QObject::connect(
+                results->selectionModel(),
+                &QItemSelectionModel::currentRowChanged,
+                &window,
+                [&](const QModelIndex& current, const QModelIndex&) {
+                    if (!current.isValid()) {
+                        return;
+                    }
+
+                    const QString size = model->data(
+                        model->index(current.row(), 3)).toString();
+                    if (size == efcrawler::ResourceClassifier::formatSize(-1)) {
+                        const QUrl url(model->data(
+                            model->index(current.row(), 5)).toString());
+                        mediaProbe.probe(url);
+                    }
+                });
+
+            QObject::connect(
+                &mediaProbe,
+                &efcrawler::MediaProbe::probed,
+                &window,
+                [&](const QUrl& url, const efcrawler::MediaInfo& info) {
+                    const QString canonical = url.adjusted(QUrl::RemoveFragment)
+                                                  .toString(QUrl::FullyEncoded);
+                    for (int row = 0; row < model->rowCount(); ++row) {
+                        const QUrl rowUrl(model->data(model->index(row, 5)).toString());
+                        if (rowUrl.adjusted(QUrl::RemoveFragment)
+                                .toString(QUrl::FullyEncoded) != canonical) {
+                            continue;
+                        }
+
+                        if (info.ok && info.bytes > 0) {
+                            model->item(row, 3)->setText(
+                                efcrawler::ResourceClassifier::formatSize(info.bytes));
+                        }
+
+                        if (info.ok && !info.mime.isEmpty()) {
+                            const auto guess =
+                                efcrawler::ResourceClassifier::classify(url);
+                            const auto classified =
+                                efcrawler::ResourceClassifier::refine(guess, info.mime);
+                            model->item(row, 1)->setText(
+                                efcrawler::resourceTypeLabel(classified.type));
+
+                            QStandardItem* title = model->item(row, 0);
+                            const bool wasDownloadable =
+                                title->data(Qt::UserRole).toBool();
+                            title->setData(
+                                wasDownloadable && classified.downloadable,
+                                Qt::UserRole);
+                        }
+                        break;
+                    }
+                });
 
     QObject::connect(
         &engine,

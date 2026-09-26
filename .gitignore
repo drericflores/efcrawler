@@ -9,3 +9,4 @@ freezes/
 # Never commit SSH keys
 *githubkey
 *githubkey.pub
+build.sh
