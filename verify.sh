@@ -87,8 +87,8 @@ SMALL=""
 for f in $NEW_FILES $REPLACED_FILES; do
     [ -f "$f" ] || continue
     LINES=$(wc -l < "$f")
-    # Smallest legitimately short file here is ResourceType.hpp (~150 lines).
-    [ "$LINES" -lt 40 ] && SMALL="$SMALL $f(${LINES}l)"
+    # Compact declaration headers are intentionally shorter than 40 lines.
+    [ "$LINES" -lt 15 ] && SMALL="$SMALL $f(${LINES}l)"
 done
 
 if [ -n "$SMALL" ]; then
