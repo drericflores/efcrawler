@@ -6,19 +6,29 @@
 #include <QNetworkReply>
 #include <QSet>
 #include <QString>
-#include <QUrl>
 
 namespace efcrawler {
 
-class DuckDuckGoProvider final : public SearchProvider
+// The best fit for "no probe needed": one request returns MIME, byte size,
+// direct file URL, and a licence short name.
+class CommonsProvider final : public SearchProvider
 {
     Q_OBJECT
 
 public:
-    explicit DuckDuckGoProvider(QObject* parent = nullptr);
+    enum class FileKind {
+        Any,
+        Audio,
+        Video,
+        Bitmap
+    };
+
+    explicit CommonsProvider(QObject* parent = nullptr);
 
     [[nodiscard]] QString name() const override;
     [[nodiscard]] bool isBusy() const noexcept override;
+
+    void setFileKind(FileKind kind);
 
 public slots:
     void search(const QString& query) override;
@@ -28,14 +38,12 @@ private:
     void processReply(QNetworkReply* reply);
     void releaseActiveReply();
 
-    // Replaces a hand-rolled entity table plus a tag-stripping regex.
-    [[nodiscard]] static QString plainTextFromHtml(QStringView html);
-    [[nodiscard]] static QUrl extractTarget(const QUrl& url);
-    [[nodiscard]] static bool looksLikeChallenge(const QString& html);
+    [[nodiscard]] static QString kindToken(FileKind kind);
 
     QNetworkAccessManager network_;
     QNetworkReply* activeReply_{nullptr};
     QSet<QString> seenUrls_;
+    FileKind kind_{FileKind::Any};
 };
 
 } // namespace efcrawler

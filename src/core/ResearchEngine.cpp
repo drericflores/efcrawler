@@ -1,120 +1,130 @@
 #include "ResearchEngine.hpp"
 
+#include "LicenseGate.hpp"
+#include "../model/ResourceClassifier.hpp"
+#include "../providers/CommonsProvider.hpp"
+#include "../providers/DuckDuckGoProvider.hpp"
+#include "../providers/InternetArchiveProvider.hpp"
 #include "../providers/ProviderManager.hpp"
 #include "../providers/SearchProvider.hpp"
+#include "../providers/WikipediaProvider.hpp"
 
+#include <QRandomGenerator>
 #include <QStringList>
+#include <QTimer>
+
+#include <utility>
 
 namespace efcrawler {
 
 ResearchEngine::ResearchEngine(QObject* parent)
     : QObject(parent)
 {
-    provider_ = new ProviderManager(this);
+    // --- general chain: scraped, so it gets the polite rate limit ---
+    auto* general = new ProviderManager(this);
+    general->addProvider(new DuckDuckGoProvider(general));
+    general->addProvider(new WikipediaProvider(general));
+    general_ = general;
 
-    connect(
-        provider_,
-        &SearchProvider::resultFound,
-        this,
-        [this](SearchResult result) {
-            const QString canonical =
-                result.url
-                    .adjusted(QUrl::RemoveFragment)
-                    .toString(QUrl::FullyEncoded);
+    // --- media chain: documented JSON APIs, no scraping ---
+    auto* media = new ProviderManager(this);
 
-            if (seenUrls_.contains(canonical)) {
-                return;
-            }
+    archive_ = new InternetArchiveProvider(media);
+    media->addProvider(archive_);
+    media->addProvider(new CommonsProvider(media));
+    media_ = media;
 
-            seenUrls_.insert(canonical);
-
-            if (freeOnly_) {
-                if (looksCommercial(result) &&
-                    !looksFree(result)) {
-                    return;
-                }
-
-                result.access =
-                    looksFree(result)
-                        ? QStringLiteral("Free candidate")
-                        : QStringLiteral("Free/unknown");
-            } else {
-                result.access =
-                    QStringLiteral("Web page");
-            }
-
-            ++resultCount_;
-
-            emit resultDiscovered(result);
-
-            emit progressChanged(
-                queriesCompleted_,
-                totalQueries_,
-                resultCount_);
-        });
-
-    connect(
-        provider_,
-        &SearchProvider::providerUnavailable,
-        this,
-        [this](const QString& provider,
-               const QString& reason) {
-            providerAvailable_ = false;
-
-            emit providerStatusChanged(
-                provider,
-                QStringLiteral("Unavailable"));
-
-            emit statusChanged(
-                QStringLiteral("%1 unavailable — %2")
-                    .arg(provider, reason));
-        });
-
-    connect(
-        provider_,
-        &SearchProvider::providerError,
-        this,
-        [this](const QString& provider,
-               const QString& message) {
-            emit providerStatusChanged(
-                provider,
-                QStringLiteral("Error"));
-
-            emit statusChanged(
-                QStringLiteral("%1 error — %2")
-                    .arg(provider, message));
-        });
-
-    connect(
-        provider_,
-        &SearchProvider::searchFinished,
-        this,
-        [this]() {
-            if (stopRequested_) {
-                return;
-            }
-
-            ++queriesCompleted_;
-
-            emit progressChanged(
-                queriesCompleted_,
-                totalQueries_,
-                resultCount_);
-
-            if (!providerAvailable_) {
-                pendingQueries_.clear();
-                finishResearch();
-                return;
-            }
-
-            if (state_ == State::Searching) {
-                dispatchNextQuery();
-            }
-        });
+    wireProvider(general_, false);
+    wireProvider(media_, true);
 }
 
-ResearchEngine::State
-ResearchEngine::state() const noexcept
+void ResearchEngine::wireProvider(SearchProvider* provider, bool media)
+{
+    connect(provider, &SearchProvider::resultFound,
+            this, [this](SearchResult result) { handleResult(std::move(result)); });
+
+    connect(provider, &SearchProvider::providerUnavailable, this,
+            [this, media](const QString& name, const QString& reason) {
+                if (media) {
+                    mediaAvailable_ = false;
+                } else {
+                    generalAvailable_ = false;
+                }
+
+                emit providerStatusChanged(name, QStringLiteral("Unavailable"));
+                emit statusChanged(QStringLiteral("%1 unavailable — %2")
+                                       .arg(name, reason));
+            });
+
+    connect(provider, &SearchProvider::providerError, this,
+            [this](const QString& name, const QString& message) {
+                emit providerStatusChanged(name, QStringLiteral("Error"));
+                emit statusChanged(QStringLiteral("%1 error — %2")
+                                       .arg(name, message));
+            });
+
+    connect(provider, &SearchProvider::searchFinished, this, [this]() {
+        if (stopRequested_) {
+            return;
+        }
+
+        ++queriesCompleted_;
+
+        emit progressChanged(queriesCompleted_, totalQueries_, resultCount_);
+
+        if (state_ == State::Searching) {
+            dispatchNextQuery();
+        }
+    });
+}
+
+void ResearchEngine::handleResult(SearchResult result)
+{
+    const QString canonical =
+        result.url.adjusted(QUrl::RemoveFragment).toString(QUrl::FullyEncoded);
+
+    if (seenUrls_.contains(canonical)) {
+        return;
+    }
+    seenUrls_.insert(canonical);
+
+    // Providers that carry authoritative metadata (Archive.org mediatype,
+    // Commons MIME) set `type` themselves; everything else is classified here
+    // so both providers agree on what a given URL is.
+    if (result.type == ResourceType::Unknown) {
+        const TypeInfo info = result.mime.isEmpty()
+            ? ResourceClassifier::classify(result.url)
+            : ResourceClassifier::refine(ResourceClassifier::classify(result.url),
+                                         result.mime);
+
+        result.type = info.type;
+        result.downloadable = info.downloadable;
+        result.streamable = info.streamable;
+        result.ambiguous = info.ambiguous;
+
+        if (result.mime.isEmpty()) {
+            result.mime = info.mime;
+        }
+    }
+
+    if (result.size.isEmpty()) {
+        result.size = ResourceClassifier::formatSize(-1);
+    }
+
+    // Keep access classification in one decision point.
+    result.access = LicenseGate::judge(result);
+
+    if (!LicenseGate::shouldKeep(result, options_.freeOnly)) {
+        return;
+    }
+
+    ++resultCount_;
+
+    emit resultDiscovered(result);
+    emit progressChanged(queriesCompleted_, totalQueries_, resultCount_);
+}
+
+ResearchEngine::State ResearchEngine::state() const noexcept
 {
     return state_;
 }
@@ -141,22 +151,30 @@ int ResearchEngine::totalQueries() const noexcept
 
 bool ResearchEngine::freeOnly() const noexcept
 {
-    return freeOnly_;
+    return options_.freeOnly;
+}
+
+ResearchPlanOptions ResearchEngine::options() const noexcept
+{
+    return options_;
 }
 
 void ResearchEngine::setFreeOnly(bool enabled)
 {
-    freeOnly_ = enabled;
+    options_.freeOnly = enabled;
 }
 
-void ResearchEngine::startResearch(
-    const QString& topic)
+void ResearchEngine::setOptions(const ResearchPlanOptions& options)
+{
+    options_ = options;
+}
+
+void ResearchEngine::startResearch(const QString& topic)
 {
     const QString normalized = topic.trimmed();
 
     if (normalized.isEmpty()) {
-        emit statusChanged(
-            QStringLiteral("Enter a research topic."));
+        emit statusChanged(QStringLiteral("Enter a research topic."));
         return;
     }
 
@@ -172,8 +190,20 @@ void ResearchEngine::startResearch(
     queriesCompleted_ = 0;
     resultCount_ = 0;
 
-    providerAvailable_ = true;
+    generalAvailable_ = true;
+    mediaAvailable_ = true;
     stopRequested_ = false;
+    pendingDispatch_ = false;
+    firstQuery_ = true;
+
+    // Keep the media chain's mediatype filter in step with the checkboxes.
+    if (auto* archive = dynamic_cast<InternetArchiveProvider*>(archive_)) {
+        QStringList types;
+        if (options_.wantAudio)  { types << QStringLiteral("audio"); }
+        if (options_.wantMovies) { types << QStringLiteral("movies"); }
+        if (options_.wantMedia)  { types << QStringLiteral("image") << QStringLiteral("texts"); }
+        archive->setMediatypeFilter(types.join(QStringLiteral(" OR ")));
+    }
 
     buildResearchPlan();
 
@@ -182,23 +212,12 @@ void ResearchEngine::startResearch(
     emit resultsCleared();
     emit researchStarted(topic_);
 
-    emit providerStatusChanged(
-        provider_->name(),
-        QStringLiteral("Ready"));
+    emit providerStatusChanged(general_->name(), QStringLiteral("Ready"));
+    emit progressChanged(0, totalQueries_, 0);
 
-    emit progressChanged(
-        0,
-        totalQueries_,
-        0);
-
-    emit statusChanged(
-        freeOnly_
-            ? QStringLiteral(
-                  "Free-resource research started: %1")
-                  .arg(topic_)
-            : QStringLiteral(
-                  "Research started: %1")
-                  .arg(topic_));
+    emit statusChanged(options_.freeOnly
+        ? QStringLiteral("Free-resource research started: %1").arg(topic_)
+        : QStringLiteral("Research started: %1").arg(topic_));
 
     dispatchNextQuery();
 }
@@ -213,10 +232,8 @@ void ResearchEngine::pauseResearch()
 
     emit researchPaused();
 
-    emit statusChanged(
-        QStringLiteral(
-            "Research paused. Current request may "
-            "finish; no new request will start."));
+    emit statusChanged(QStringLiteral(
+        "Research paused. Current request may finish; no new request will start."));
 }
 
 void ResearchEngine::resumeResearch()
@@ -228,11 +245,9 @@ void ResearchEngine::resumeResearch()
     state_ = State::Searching;
 
     emit researchResumed();
+    emit statusChanged(QStringLiteral("Research resumed."));
 
-    emit statusChanged(
-        QStringLiteral("Research resumed."));
-
-    if (!provider_->isBusy()) {
+    if (!general_->isBusy() && !media_->isBusy()) {
         dispatchNextQuery();
     }
 }
@@ -248,61 +263,87 @@ void ResearchEngine::stopResearch()
 
     pendingQueries_.clear();
 
-    provider_->cancel();
+    general_->cancel();
+    media_->cancel();
 
-    emit statusChanged(
-        QStringLiteral(
-            "Research stopped — %1 result(s) retained.")
-            .arg(resultCount_));
+    emit statusChanged(QStringLiteral("Research stopped — %1 result(s) retained.")
+                           .arg(resultCount_));
 
     emit researchStopped();
 }
 
 void ResearchEngine::buildResearchPlan()
 {
-    if (freeOnly_) {
-        pendingQueries_.enqueue(
-            topic_ +
-            QStringLiteral(" free download"));
+    const QString t = topic_;
+    const bool free = options_.freeOnly;
 
-        pendingQueries_.enqueue(
-            topic_ +
-            QStringLiteral(" free PDF"));
+    const auto add = [this](const QString& text, bool media = false) {
+        pendingQueries_.enqueue(PlannedQuery{ text, media });
+    };
 
-        pendingQueries_.enqueue(
-            topic_ +
-            QStringLiteral(" open access"));
-
-        pendingQueries_.enqueue(
-            topic_ +
-            QStringLiteral(" public domain"));
-
-        pendingQueries_.enqueue(
-            QStringLiteral("\"%1\" free filetype:pdf")
-                .arg(topic_));
-
-        pendingQueries_.enqueue(
-            topic_ +
-            QStringLiteral(
-                " free manual OR documentation"));
+    // --- general ---
+    if (free) {
+        add(t + QStringLiteral(" free download"));
+        add(t + QStringLiteral(" free PDF"));
+        add(t + QStringLiteral(" open access"));
+        add(t + QStringLiteral(" public domain"));
+        add(QStringLiteral("\"%1\" free filetype:pdf").arg(t));
+        add(t + QStringLiteral(" free manual OR documentation"));
     } else {
-        pendingQueries_.enqueue(topic_);
+        add(t);
+        add(t + QStringLiteral(" PDF"));
+        add(t + QStringLiteral(" book"));
+        add(t + QStringLiteral(" manual"));
+        add(QStringLiteral("\"%1\" filetype:pdf").arg(t));
+        add(t + QStringLiteral(" tutorial"));
+    }
 
-        pendingQueries_.enqueue(
-            topic_ + QStringLiteral(" PDF"));
+    // --- Audio ---
+    if (options_.wantAudio) {
+        if (free) {
+            add(t + QStringLiteral(" filetype:mp3"));
+            add(t + QStringLiteral(" public domain audio"));
+            add(t + QStringLiteral(" podcast mp3 open license"));
+            add(QStringLiteral("site:openverse.org \"%1\" audio").arg(t));
+            add(QStringLiteral("\"%1\" creative commons music").arg(t), true);
+            add(QStringLiteral("site:commons.wikimedia.org \"%1\" audio").arg(t), true);
+            add(QStringLiteral("site:archive.org \"%1\" mediatype:audio").arg(t), true);
+        } else {
+            add(t + QStringLiteral(" mp3"));
+            add(t + QStringLiteral(" audio download"));
+            add(t + QStringLiteral(" song OR album OR soundtrack"));
+            add(QStringLiteral("site:archive.org \"%1\" mediatype:audio").arg(t), true);
+        }
+    }
 
-        pendingQueries_.enqueue(
-            topic_ + QStringLiteral(" book"));
+    // --- Movies ---
+    if (options_.wantMovies) {
+        if (free) {
+            add(t + QStringLiteral(" filetype:mp4"));
+            add(t + QStringLiteral(" public domain film"));
+            add(t + QStringLiteral(" creative commons video"));
+            add(t + QStringLiteral(" open movie download"));
+            add(QStringLiteral("site:commons.wikimedia.org \"%1\" video").arg(t), true);
+            add(QStringLiteral("site:archive.org \"%1\" mediatype:movies").arg(t), true);
+        } else {
+            add(t + QStringLiteral(" mp4"));
+            add(t + QStringLiteral(" video download"));
+            add(t + QStringLiteral(" trailer OR documentary OR film"));
+            add(QStringLiteral("site:archive.org \"%1\" mediatype:movies").arg(t), true);
+        }
+    }
 
-        pendingQueries_.enqueue(
-            topic_ + QStringLiteral(" manual"));
-
-        pendingQueries_.enqueue(
-            QStringLiteral("\"%1\" filetype:pdf")
-                .arg(topic_));
-
-        pendingQueries_.enqueue(
-            topic_ + QStringLiteral(" tutorial"));
+    // --- Media (images, galleries, item pages) ---
+    if (options_.wantMedia) {
+        if (free) {
+            add(t + QStringLiteral(" public domain images"));
+            add(t + QStringLiteral(" creative commons images"));
+            add(QStringLiteral("site:openverse.org \"%1\"").arg(t), true);
+            add(QStringLiteral("site:commons.wikimedia.org \"%1\" filetype:bitmap").arg(t), true);
+        } else {
+            add(t + QStringLiteral(" images"));
+            add(t + QStringLiteral(" screenshots OR gallery"));
+        }
     }
 
     totalQueries_ = pendingQueries_.size();
@@ -310,17 +351,30 @@ void ResearchEngine::buildResearchPlan()
 
 void ResearchEngine::dispatchNextQuery()
 {
-    if (state_ != State::Searching) {
+    if (state_ != State::Searching || pendingDispatch_) {
         return;
     }
 
-    if (!providerAvailable_) {
-        finishResearch();
-        return;
-    }
+    // Skip plan entries whose chain is unavailable, and wait if a chain is
+    // still busy with the previous query.
+    while (!pendingQueries_.isEmpty()) {
+        const PlannedQuery& next = pendingQueries_.head();
 
-    if (provider_->isBusy()) {
-        return;
+        if (next.media && !mediaAvailable_) {
+            pendingQueries_.dequeue();
+            continue;
+        }
+        if (!next.media && !generalAvailable_) {
+            pendingQueries_.dequeue();
+            continue;
+        }
+
+        SearchProvider* provider = next.media ? media_ : general_;
+
+        if (provider->isBusy()) {
+            return;
+        }
+        break;
     }
 
     if (pendingQueries_.isEmpty()) {
@@ -328,18 +382,40 @@ void ResearchEngine::dispatchNextQuery()
         return;
     }
 
-    const QString query =
-        pendingQueries_.dequeue();
+    const PlannedQuery next = pendingQueries_.dequeue();
 
-    emit providerStatusChanged(
-        provider_->name(),
-        QStringLiteral("Searching"));
+    SearchProvider* provider = next.media ? media_ : general_;
+    const QString query = next.text;
 
-    emit statusChanged(
-        QStringLiteral("%1 — searching: %2")
-            .arg(provider_->name(), query));
+    emit providerStatusChanged(provider->name(), QStringLiteral("Searching"));
+    emit statusChanged(QStringLiteral("%1 — searching: %2")
+                           .arg(provider->name(), query));
 
-    provider_->search(query);
+    // The scraped endpoint gets a jittered gap; the JSON APIs do not need one.
+    // The first query is immediate so Start still feels responsive.
+    const int delayMs = firstQuery_
+        ? 0
+        : (next.media ? 150
+                      : rateGapMs_ + QRandomGenerator::global()->bounded(0, 500));
+
+    firstQuery_ = false;
+
+    if (delayMs == 0) {
+        provider->search(query);
+        return;
+    }
+
+    pendingDispatch_ = true;
+
+    QTimer::singleShot(delayMs, this, [this, provider, query]() {
+        pendingDispatch_ = false;
+
+        if (state_ != State::Searching || stopRequested_) {
+            return;
+        }
+
+        provider->search(query);
+    });
 }
 
 void ResearchEngine::finishResearch()
@@ -350,88 +426,18 @@ void ResearchEngine::finishResearch()
 
     state_ = State::Idle;
 
-    if (!providerAvailable_) {
-        emit statusChanged(
-            QStringLiteral(
-                "Research provider unavailable. "
-                "%1 result(s) retained.")
-                .arg(resultCount_));
+    if (!generalAvailable_ && resultCount_ == 0) {
+        emit statusChanged(QStringLiteral("Research provider unavailable. "
+                                          "%1 result(s) retained.")
+                               .arg(resultCount_));
     } else {
-        emit providerStatusChanged(
-            provider_->name(),
-            QStringLiteral("Ready"));
+        emit providerStatusChanged(general_->name(), QStringLiteral("Ready"));
 
-        emit statusChanged(
-            QStringLiteral(
-                "Research complete — %1 result(s) found.")
-                .arg(resultCount_));
+        emit statusChanged(QStringLiteral("Research complete — %1 result(s) found.")
+                               .arg(resultCount_));
     }
 
     emit researchStopped();
-}
-
-bool ResearchEngine::looksCommercial(
-    const SearchResult& result) const
-{
-    const QString haystack =
-        (result.title + QLatin1Char(' ') +
-         result.source + QLatin1Char(' ') +
-         result.url.toString())
-            .toLower();
-
-    static const QStringList indicators = {
-        QStringLiteral("buy"),
-        QStringLiteral("purchase"),
-        QStringLiteral("pricing"),
-        QStringLiteral("subscription"),
-        QStringLiteral("subscribe"),
-        QStringLiteral("checkout"),
-        QStringLiteral("shopping"),
-        QStringLiteral("cart"),
-        QStringLiteral("store"),
-        QStringLiteral("amazon."),
-        QStringLiteral("ebay."),
-        QStringLiteral("walmart."),
-        QStringLiteral("barnesandnoble."),
-        QStringLiteral("abebooks.")
-    };
-
-    for (const QString& indicator : indicators) {
-        if (haystack.contains(indicator)) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-bool ResearchEngine::looksFree(
-    const SearchResult& result) const
-{
-    const QString haystack =
-        (result.title + QLatin1Char(' ') +
-         result.source + QLatin1Char(' ') +
-         result.url.toString())
-            .toLower();
-
-    static const QStringList indicators = {
-        QStringLiteral("free"),
-        QStringLiteral("open access"),
-        QStringLiteral("public domain"),
-        QStringLiteral("gutenberg"),
-        QStringLiteral("archive.org"),
-        QStringLiteral(".gov"),
-        QStringLiteral(".edu"),
-        QStringLiteral(".pdf")
-    };
-
-    for (const QString& indicator : indicators) {
-        if (haystack.contains(indicator)) {
-            return true;
-        }
-    }
-
-    return false;
 }
 
 } // namespace efcrawler

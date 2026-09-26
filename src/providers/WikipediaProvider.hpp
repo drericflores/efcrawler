@@ -4,7 +4,9 @@
 
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QSet>
+#include <QString>
 #include <QStringList>
 
 namespace efcrawler {
@@ -37,8 +39,9 @@ private:
     void processExternalLinksReply(QNetworkReply* reply);
 
     void finish();
+    void releaseActiveReply();
 
-    static QString classifyResource(const QUrl& url);
+    [[nodiscard]] QNetworkRequest makeRequest(const QUrl& url) const;
 
     QNetworkAccessManager network_;
     QNetworkReply* activeReply_{nullptr};

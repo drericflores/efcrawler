@@ -15,7 +15,6 @@ find_package(Qt6 6.4 REQUIRED COMPONENTS
     Core
     Widgets
     Network
-    Sql
 )
 
 qt_standard_project_setup()
@@ -27,7 +26,17 @@ qt_add_executable(efcrawler
 
     src/core/ResearchEngine.cpp
     src/core/ResearchEngine.hpp
-
+    src/model/ResourceType.hpp
+    src/model/ResourceClassifier.hpp
+    src/model/ResourceClassifier.cpp
+    src/model/MediaProbe.hpp
+    src/model/MediaProbe.cpp
+    src/core/LicenseGate.hpp
+    src/core/LicenseGate.cpp
+    src/providers/InternetArchiveProvider.hpp
+    src/providers/InternetArchiveProvider.cpp
+    src/providers/CommonsProvider.hpp
+    src/providers/CommonsProvider.cpp
     src/model/SearchResult.hpp
 
     src/providers/SearchProvider.hpp
@@ -39,11 +48,14 @@ qt_add_executable(efcrawler
     src/providers/WikipediaProvider.hpp
 )
 
+target_compile_definitions(efcrawler PRIVATE
+    EFCRAWLER_VERSION="${PROJECT_VERSION}"
+)
+
 target_link_libraries(efcrawler PRIVATE
     Qt6::Core
     Qt6::Widgets
     Qt6::Network
-    Qt6::Sql
 )
 
 target_compile_options(efcrawler PRIVATE

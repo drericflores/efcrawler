@@ -6,19 +6,23 @@
 #include <QNetworkReply>
 #include <QSet>
 #include <QString>
-#include <QUrl>
 
 namespace efcrawler {
 
-class DuckDuckGoProvider final : public SearchProvider
+// API-based rather than scraped, and returns `licenseurl` -- which is what
+// lets LicenseGate stop guessing at licences from substrings.
+class InternetArchiveProvider final : public SearchProvider
 {
     Q_OBJECT
 
 public:
-    explicit DuckDuckGoProvider(QObject* parent = nullptr);
+    explicit InternetArchiveProvider(QObject* parent = nullptr);
 
     [[nodiscard]] QString name() const override;
     [[nodiscard]] bool isBusy() const noexcept override;
+
+    // "audio", "movies", "image OR texts"; empty means no mediatype filter.
+    void setMediatypeFilter(const QString& filter);
 
 public slots:
     void search(const QString& query) override;
@@ -28,14 +32,10 @@ private:
     void processReply(QNetworkReply* reply);
     void releaseActiveReply();
 
-    // Replaces a hand-rolled entity table plus a tag-stripping regex.
-    [[nodiscard]] static QString plainTextFromHtml(QStringView html);
-    [[nodiscard]] static QUrl extractTarget(const QUrl& url);
-    [[nodiscard]] static bool looksLikeChallenge(const QString& html);
-
     QNetworkAccessManager network_;
     QNetworkReply* activeReply_{nullptr};
     QSet<QString> seenUrls_;
+    QString mediatypeFilter_;
 };
 
 } // namespace efcrawler

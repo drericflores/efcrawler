@@ -1,4 +1,5 @@
 #include "core/ResearchEngine.hpp"
+#include "model/ResourceType.hpp"
 
 #include <QAbstractItemView>
 #include <QAction>
@@ -1393,7 +1394,7 @@ int main(int argc, char* argv[])
 
             auto* typeItem =
                 new QStandardItem(
-                    result.type);
+                    efcrawler::resourceTypeLabel(result.type));
 
             auto* sourceItem =
                 new QStandardItem(
@@ -1405,7 +1406,7 @@ int main(int argc, char* argv[])
 
             auto* accessItem =
                 new QStandardItem(
-                    result.access);
+                    efcrawler::accessLabel(result.access));
 
             auto* urlItem =
                 new QStandardItem(
