@@ -236,7 +236,7 @@ eFCrawler/
 
 eFCrawler is under active development.
 
-**Current version: 0.2.3**
+**Current version: 0.3.0**
 
 The current release has been tested for application startup, repeated research
 operations, provider fallback, WEB and PDF discovery, opening resources, direct
@@ -282,17 +282,12 @@ providers used.
 Independent software developer and creator of eFCrawler.
 
 ---
+
 ## Contributing
 
-Bug reports, feature requests, and questions are welcome.
-
-- **Found a bug?** [Open a bug report](https://github.com/drericflores/efcrawler/issues/new?template=bug_report.yml)
-- **Have an idea?** [Request a feature](https://github.com/drericflores/efcrawler/issues/new?template=feature_request.yml)
-- **Want to contribute code?** See [CONTRIBUTING.md](CONTRIBUTING.md)
-
-eFCrawler depends on external research providers, so bug reports are most
-useful when they include your version, distribution, and which provider was
-active. The templates ask for these.
+Feedback, bug reports, and contributions are welcome. Please open an
+[issue](https://github.com/drericflores/efcrawler/issues) to report a problem or
+propose a change.
 
 ---
 
