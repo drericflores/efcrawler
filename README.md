@@ -1,200 +1,305 @@
 # eFCrawler
 
-## Easy & Flexible Crawler
+**Easy Flexible Crawler** — autonomous research and resource discovery for Linux.
 
-**Autonomous Research and Resource Discovery for Linux**
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)](#requirements)
+[![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](#technology)
+[![Qt 6](https://img.shields.io/badge/Qt-6-green.svg)](#technology)
 
-eFCrawler is a C++23 and Qt6 desktop application designed to simplify online research and resource discovery. It performs structured searches for a topic, collects useful resources, classifies the results, and provides direct access to web pages and downloadable documents such as PDF files.
+---
 
-Rather than requiring the user to manually repeat variations of the same search, eFCrawler automates the discovery process and presents the resulting resources in a single organized interface.
+## Overview
 
-## Current Version
+eFCrawler is a native Linux desktop application that automates online research.
 
-**eFCrawler 0.2.3 — C2R3 Qualified**
+Give it a topic, and it performs structured searches, collects the resources it
+finds, classifies them by type, and provides direct access to web pages and
+downloadable documents such as PDF files — all in a single organized interface.
 
-Version 0.2.3 C2R3 is the current qualified baseline of eFCrawler.
+Research normally means repeating variations of the same query by hand, opening
+results one at a time, and losing track of what you have already seen. eFCrawler
+automates that discovery loop so you can focus on the material rather than the
+searching.
 
-The qualified release has been tested for application startup, repeated research operations, provider fallback, WEB and PDF discovery, opening resources, direct PDF downloading, Pause/Resume, Stop, free-resource filtering, download-folder access, clean shutdown, restart, and post-restart research.
+Built with C++23 and Qt6. Free and open source.
+
+> **Screenshots** — *[add a screenshot of the main window here. This is the single
+> biggest improvement you can make to this README.]*
+
+---
 
 ## Features
 
-- Autonomous multi-query research
-- WEB resource discovery
-- PDF resource discovery
-- Resource type classification
-- Multiple research-provider architecture
-- Automatic provider fallback
-- Direct opening of web resources
-- Direct opening of PDF resources
-- PDF downloading
+**Research**
+- Autonomous multi-query research from a single topic
+- Multiple research-provider architecture with automatic fallback — research
+  continues when a provider is unavailable
 - Free-resource filtering
-- Pause and Resume research
-- Stop active research
-- Dedicated eFCrawler download directory
-- Dark and light interface themes
-- Native Linux desktop application
-- C++23 implementation
-- Qt6 graphical interface and networking
+- Pause, resume, and stop active research
 
-## Research Providers
+**Discovery**
+- Web resource discovery
+- PDF resource discovery
+- Resource classification (WEB, PDF, Document, Audio, Video)
+- Duplicate suppression across queries
 
-eFCrawler uses a provider-based research architecture.
+**Access**
+- Open web and PDF resources directly from the results list
+- Download PDF resources from within the application
+- Dedicated download directory with one-click access
 
-The current implementation includes:
+**Interface**
+- Dark and light themes
+- Native Qt6 desktop interface
 
-- **DuckDuckGo Provider** — general-purpose web and resource discovery when available.
-- **Wikipedia Provider** — fallback research provider with external-resource discovery.
+---
 
-The Provider Manager allows eFCrawler to continue research using another available provider when the primary provider is unavailable.
+## How it works
 
-This architecture is designed to allow additional research providers to be introduced as eFCrawler develops.
+eFCrawler separates research planning from resource retrieval, so providers can
+be added or replaced without changing the rest of the application.
 
-## Resource Discovery
+```
+                    ┌─────────────────┐
+                    │      User       │
+                    └────────┬────────┘
+                             │  topic
+                    ┌────────▼────────┐
+                    │ ResearchEngine  │  plan · deduplicate · filter
+                    └────────┬────────┘
+                             │  query
+                    ┌────────▼────────┐
+                    │ ProviderManager │  fallback chain
+                    └────────┬────────┘
+                             │
+              ┌──────────────┴──────────────┐
+              │                             │
+    ┌─────────▼─────────┐       ┌───────────▼────────┐
+    │  DuckDuckGo       │       │  Wikipedia         │
+    │  (primary)        │       │  (fallback)        │
+    └───────────────────┘       └────────────────────┘
+```
 
-eFCrawler distinguishes between ordinary web resources and directly accessible downloadable resources.
+### Research providers
 
-Current resource types include:
+| Provider | Role |
+| --- | --- |
+| **DuckDuckGo** | Primary general-purpose web and resource discovery |
+| **Wikipedia** | Fallback provider with external-resource discovery |
 
-- WEB
-- PDF
-- Document
-- Audio
-- Video
+The provider abstraction is deliberately extensible. Additional providers can be
+introduced without modifying the research engine or the interface.
 
-PDF resources can be opened directly or downloaded from within eFCrawler.
+### Resource types
 
-## Downloads
+eFCrawler distinguishes between ordinary web resources and directly accessible
+downloadable resources.
 
-Downloaded resources are stored in the eFCrawler directory within the user's standard Linux Downloads location.
+| Type | Description |
+| --- | --- |
+| `WEB` | Web pages and articles |
+| `PDF` | Directly accessible PDF documents |
+| `Document` | Other document formats |
+| `Audio` | Audio resources |
+| `Video` | Video resources |
 
-Typically:
+PDF resources can be opened directly or downloaded from within the application.
 
-    ~/Downloads/eFCrawler/
+---
 
-The **Downloads Folder** command provides direct access to this location from the application.
+## Requirements
 
-## Platform
+- **Operating system** — Linux, Debian/Ubuntu family (developed and tested on
+  Pop!_OS)
+- **Compiler** — a C++23-capable compiler (GCC 13+ or Clang 17+; older compilers
+  may require `-std=c++2b`)
+- **CMake** — 3.16 or newer
+- **Qt** — Qt6 with the Widgets and Network modules
 
-eFCrawler is currently developed for Linux systems, particularly Debian/Ubuntu-family distributions such as Pop!_OS.
+---
 
-The application is developed and tested using modern C++ and Qt.
+## Build
 
-### Technology
+### 1. Install dependencies
 
-- C++23
-- Qt6
-- CMake
-- Qt Widgets
-- Qt Network
-- Qt SQL
+On Debian/Ubuntu-derived systems:
 
-## Build Requirements
+```bash
+sudo apt install build-essential cmake qt6-base-dev
+```
 
-A development system requires a C++23-capable compiler, CMake, and the required Qt6 development packages.
+### 2. Clone the repository
 
-On Debian/Ubuntu-derived systems, the required packages can typically be installed with:
+```bash
+git clone https://github.com/drericflores/efcrawler.git
+cd efcrawler
+```
 
-    sudo apt install build-essential cmake qt6-base-dev
+### 3. Configure
 
-## Building
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+```
 
-Clone the repository:
+### 4. Build
 
-    git clone git@github.com:drericflores/efcrawler.git
-    cd efcrawler
+```bash
+cmake --build build -j2
+```
 
-Configure the project:
+### 5. Run
 
-    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+```bash
+./build/efcrawler
+```
 
-Build eFCrawler:
+---
 
-    cmake --build build -j2
+## Install
 
-Run the application:
+The project provides a CMake installation target for the eFCrawler executable.
 
-    ./build/efcrawler
+```bash
+sudo cmake --install build
+```
 
-## Installation
+Linux desktop integration — including the application icon and desktop launcher
+— is being incorporated into the installation system.
 
-The project includes a CMake installation target for the eFCrawler executable.
+---
 
-After building:
+## Usage
 
-    sudo cmake --install build
+1. **Enter a topic** in the research field.
+2. **Start research.** eFCrawler performs a structured series of searches and
+   streams results into the results table as they are found.
+3. **Manage the run** at any time:
+   - **Pause** — the current request finishes; no new request starts
+   - **Resume** — continue from where research stopped
+   - **Stop** — end the run; results found so far are retained
+4. **Open a resource** by selecting it and choosing **Open**.
+5. **Download a PDF** by selecting it and choosing **Download**.
+6. **Access your downloads** via the **Downloads Folder** command.
 
-Additional Linux desktop integration, including the official eFCrawler application icon and desktop launcher, is being incorporated into the installation system.
+### Where downloads go
 
-## Official Application Icon
+Downloaded resources are stored in the `eFCrawler` directory inside your
+standard Linux Downloads location:
 
-The official eFCrawler application icon is:
+```
+~/Downloads/eFCrawler/
+```
 
-    resources/efcrawler.png
+---
 
-The icon represents eFCrawler's research and resource-discovery mission.
+## Project structure
 
-It is intended for use by the application window, Linux desktop launcher, application menus, and future eFCrawler distribution packages.
+```
+eFCrawler/
+├── CMakeLists.txt
+├── README.md
+├── resources/
+│   └── efcrawler.png
+└── src/
+    ├── main.cpp
+    ├── core/
+    │   ├── ResearchEngine.cpp
+    │   └── ResearchEngine.hpp
+    ├── model/
+    │   └── SearchResult.hpp
+    └── providers/
+        ├── SearchProvider.hpp
+        ├── DuckDuckGoProvider.cpp
+        ├── DuckDuckGoProvider.hpp
+        ├── ProviderManager.cpp
+        ├── ProviderManager.hpp
+        ├── WikipediaProvider.cpp
+        └── WikipediaProvider.hpp
+```
 
-## Project Structure
+---
 
-    eFCrawler/
-    ├── CMakeLists.txt
-    ├── README.md
-    ├── resources/
-    │   └── efcrawler.png
-    └── src/
-        ├── main.cpp
-        ├── core/
-        │   ├── ResearchEngine.cpp
-        │   └── ResearchEngine.hpp
-        ├── model/
-        │   └── SearchResult.hpp
-        └── providers/
-            ├── SearchProvider.hpp
-            ├── DuckDuckGoProvider.cpp
-            ├── DuckDuckGoProvider.hpp
-            ├── ProviderManager.cpp
-            ├── ProviderManager.hpp
-            ├── WikipediaProvider.cpp
-            └── WikipediaProvider.hpp
+## Technology
 
-## Development Philosophy
+| Component | Used for |
+| --- | --- |
+| **C++23** | Implementation language |
+| **Qt6** | Graphical interface and networking |
+| **Qt Widgets** | Desktop interface |
+| **Qt Network** | Research requests and downloads |
+| **CMake** | Build system |
 
-eFCrawler is intended to make research easier by reducing repetitive manual searching while keeping discovered resources visible and accessible to the user.
+---
 
-The project emphasizes:
-
-- simple operation
-- useful resource discovery
-- direct access to discovered material
-- resilient research-provider architecture
-- native Linux integration
-- maintainable modern C++ design
-
-## Project Status
+## Project status
 
 eFCrawler is under active development.
 
-The current stable development baseline is:
+**Current version: 0.2.3**
 
-**Version 0.2.3 — C2R3 Qualified**
+The current release has been tested for application startup, repeated research
+operations, provider fallback, WEB and PDF discovery, opening resources, direct
+PDF downloading, pause and resume, stop, free-resource filtering, download-folder
+access, clean shutdown, restart, and post-restart research.
 
-Future development will build from this qualified baseline while preserving previously qualified recovery points.
+### Roadmap
+
+- Expanded media discovery — audio, video, and image resource types
+- Additional research providers
+- Result metadata including file size and licence information
+- Automated test suite and continuous integration
+- First tagged release
+
+---
+
+## License
+
+Copyright © 2026 Dr. Eric O. Flores.
+
+eFCrawler is free software, distributed for educational and research purposes.
+You may use, study, modify, and redistribute it under the terms of the
+**GNU General Public License, version 3 or later**. See [LICENSE](LICENSE) for
+the full terms.
+
+This program is distributed in the hope that it will be useful, but **without
+any warranty**; without even the implied warranty of merchantability or fitness
+for a particular purpose.
+
+### Downloads
+
+eFCrawler retrieves third-party web and PDF resources. Educational intent does
+not grant rights to redistribute downloaded material — those rights remain with
+the original publishers. Users are responsible for complying with the terms of
+any resource they download, and with the terms of service of the research
+providers used.
+
+---
 
 ## Author
 
 **Dr. Eric O. Flores**
-
 Independent software developer and creator of eFCrawler.
 
-## Support eFCrawler
+---
 
-eFCrawler is developed and maintained as an independent software project.
+## Contributing
 
-If you find eFCrawler useful and would like to support its continued development, documentation, testing, and maintenance, voluntary donations are appreciated.
+Feedback, bug reports, and contributions are welcome. Please open an
+[issue](https://github.com/drericflores/efcrawler/issues) to report a problem or
+propose a change.
 
-Donations are entirely optional and do not affect access to eFCrawler's functionality.
+---
 
-**Zelle:** eoftoro@gmail.com
+## Support
+
+eFCrawler is developed and maintained as an independent project. If you find it
+useful and would like to support its continued development, documentation,
+testing, and maintenance, voluntary donations are appreciated.
+
+Donations are entirely optional and do not affect access to eFCrawler's
+functionality.
+
+**Zelle:** [eoftoro@gmail.com](mailto:eoftoro@gmail.com)
 
 Thank you for supporting the continued development of eFCrawler.
